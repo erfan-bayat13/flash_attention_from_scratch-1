@@ -23,7 +23,7 @@ class BaseFlashAttentionTest:
         dtype = cls.dtype()
         device = "cuda:0"
 
-        cls.d_heads = [16] #128
+        cls.d_heads = [128] #128
 
         cls.data = {}
         cls.pt_b16_results = {}
