@@ -29,7 +29,8 @@ FlashForwardKernelConfig py_to_cpp_kernel_config(const py::object &py_cfg) {
         py::cast<int>(py_cfg.attr("V_mma_load_K_tiles")),
         py::cast<bool>(py_cfg.attr("mma_double_buffer_loads")),
         py::cast<bool>(py_cfg.attr("optimized_softmax")),
-        py::cast<bool>(py_cfg.attr("causal"))};
+        py::cast<bool>(py_cfg.attr("causal")),
+        py::cast<int>(py_cfg.attr("n_kv_heads"))};
 }
 
 decltype(auto)
@@ -69,11 +70,18 @@ flash_attention_forward(const py::object &py_cfg, const torch::Tensor &TQ,
     const auto seq_len = TQ.size(1);
     const auto n_heads = TQ.size(2);
 
-    // Only supported configuration currently.
-    TORCH_CHECK(TQ.sizes() == TK.sizes(),
-                "Query and key tensors have same shape");
-    TORCH_CHECK(TQ.sizes() == TV.sizes(),
-                "Query and value tensors have same shape");
+    // Shape checks — for GQA, K and V may have fewer heads than Q.
+    TORCH_CHECK(TQ.size(0) == TK.size(0) && TQ.size(0) == TV.size(0),
+                "Batch sizes of Q, K, V must match");
+    TORCH_CHECK(TQ.size(1) == TK.size(1) && TQ.size(1) == TV.size(1),
+                "Sequence lengths of Q, K, V must match");
+    TORCH_CHECK(TK.size(2) == TV.size(2),
+                "K and V must have the same number of KV heads");
+    TORCH_CHECK(TQ.size(3) == TK.size(3) && TQ.size(3) == TV.size(3),
+                "d_head of Q, K, V must match");
+    TORCH_CHECK((int)TK.size(2) == cfg.n_kv_heads,
+                "K tensor KV-head count (", TK.size(2),
+                ") must equal kernel config n_kv_heads (", cfg.n_kv_heads, ")");
 
     const int B_r = cfg.B_r;
     const int B_c = cfg.B_c;
@@ -85,6 +93,7 @@ flash_attention_forward(const py::object &py_cfg, const torch::Tensor &TQ,
     const auto batch_stride = TQ.stride(0);
     const auto seq_stride = TQ.stride(1);
     const auto head_stride = TQ.stride(2);
+    const auto kv_batch_stride = TK.stride(0); // may differ from batch_stride for GQA
 
     torch::Tensor TO;
     if (out_.has_value()) {
@@ -103,10 +112,11 @@ flash_attention_forward(const py::object &py_cfg, const torch::Tensor &TQ,
     const int n_threads = cfg.n_warps * WARP_SIZE;
     float softmax_scale = M_LOG2E / sqrtf(d_head);
 
-    ForwardKernelArgs args{TQ.data_ptr(), TK.data_ptr(), TV.data_ptr(),
-                           TO.data_ptr(), batch_stride,  seq_stride,
-                           head_stride,   seq_len,       n_heads,
-                           n_Q_blocks,    n_KV_blocks};
+    ForwardKernelArgs args{TQ.data_ptr(),   TK.data_ptr(), TV.data_ptr(),
+                           TO.data_ptr(),   batch_stride,  seq_stride,
+                           head_stride,     kv_batch_stride,
+                           seq_len,         n_heads,
+                           n_Q_blocks,      n_KV_blocks};
 
     dim3 blockDim(n_threads);
     dim3 gridDim{static_cast<uint>(n_Q_blocks), static_cast<uint>(n_heads),

@@ -119,6 +119,8 @@ class FlashForwardKernelConfig:
     mma_double_buffer_loads: bool
     optimized_softmax: bool
     causal: bool = False
+    # GQA: number of KV heads. 16 == MHA (same as N_HEADS).
+    n_kv_heads: int = 16
 
     def __str__(self):
         return self.short_form()
@@ -145,6 +147,8 @@ class FlashForwardKernelConfig:
             strs.append("opt_softmax")
         if self.causal:
             strs.append("causal")
+        if self.n_kv_heads != 16:
+            strs.append(f"gqa{self.n_kv_heads}h")
 
         return base + "+".join(strs)
 
@@ -161,7 +165,8 @@ class FlashForwardKernelConfig:
             f"{vstr(self.async_copy)}, {vstr(self.eager_load_blocks)}, "
             f"{vstr(self.swizzled)}, {self.Q_mma_load_K_tiles}, {self.K_mma_load_K_tiles}, "
             f"{self.V_mma_load_K_tiles}, {vstr(self.mma_double_buffer_loads)}, "
-            f"{vstr(self.optimized_softmax)}, {vstr(self.causal)}"
+            f"{vstr(self.optimized_softmax)}, {vstr(self.causal)}, "
+            f"{self.n_kv_heads}"
             f"}}"
         )
 
@@ -243,8 +248,9 @@ def _parse_flash_forward_demanged_name_with_types(
         else:
             raise ValueError(f"Unexpected parameter format: {value}")
 
-    # Accept 13 params (causal defaults to False) or 14 (causal explicit).
-    if len(params) not in (13, 14):
+    # Accept 13 (causal=False, n_kv_heads=16), 14 (explicit causal, n_kv_heads=16),
+    # or 15 (explicit causal and n_kv_heads).
+    if len(params) not in (13, 14, 15):
         raise ValueError("Incorrect number of parameters parsed")
 
     # Return the dataclass instance

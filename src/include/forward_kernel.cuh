@@ -149,14 +149,20 @@ flash_forward_kernel(__grid_constant__ const ForwardKernelArgs args) {
 
     const index_t gmem_seq_stride = args.seq_stride;
 
-    const index_t sample_head_offset =
+    // Q/O use the full head index.
+    const index_t QO_sample_head_offset =
         sample * args.batch_stride + head * args.head_stride;
+    // K/V use the GQA head index: head / gqa_groups.
+    // For MHA gqa_groups == 1, so kv_head == head (no change).
+    const index_t kv_head = head / Kernel::gqa_groups;
+    const index_t KV_sample_head_offset =
+        sample * args.kv_batch_stride + kv_head * args.head_stride;
+
     // We only read/write one block for Q and O.
-    // These offsets are the same for the whole thread-block.
     const index_t QO_gmem_block_offset =
-        sample_head_offset + q_seq_block * Kernel::B_r * gmem_seq_stride;
-    // We read the entire key sequence.
-    const index_t KV_gmem_block_offset = sample_head_offset;
+        QO_sample_head_offset + q_seq_block * Kernel::B_r * gmem_seq_stride;
+    // We read the entire key/value sequence starting at the head's base.
+    const index_t KV_gmem_block_offset = KV_sample_head_offset;
 
     value_t *gmem_Q = &static_cast<value_t *>(args.Q)[QO_gmem_block_offset];
     value_t *gmem_O = &static_cast<value_t *>(args.O)[QO_gmem_block_offset];

@@ -118,6 +118,9 @@ struct StaticForwardKernelConfig {
     static constexpr bool eager_load_blocks = CFG.eager_load_blocks;
     static constexpr bool optimized_softmax = CFG.optimized_softmax;
     static constexpr bool causal = CFG.causal;
+    // GQA: number of KV heads and groups.  gqa_groups == 1 means MHA.
+    static constexpr int n_kv_heads = CFG.n_kv_heads;
+    static constexpr int gqa_groups = N_HEADS / CFG.n_kv_heads;
 
     static constexpr int SwizzleTileSize = SWIZZLE_TILE_SIZE;
     static constexpr int DHeadSwizzleTiles = d_head / SwizzleTileSize;
@@ -143,8 +146,12 @@ struct StaticForwardKernelConfig {
     using GSMemShapeQO = GSMemShape<B_r, SwizzleTileSize, 1, DHeadSwizzleTiles>;
     using GSMemShapeKV = GSMemShape<B_c, SwizzleTileSize, 1, DHeadSwizzleTiles>;
 
-    // does not include row stride
+    // Q/O row stride in gmem: n_heads * d_head elements per seq position.
     using GMemStride = SMemStride<CFG.d_head * N_HEADS, 1, 0, SwizzleTileSize>;
+    // K/V row stride in gmem: n_kv_heads * d_head elements per seq position.
+    // For MHA (n_kv_heads == N_HEADS) this is identical to GMemStride.
+    using GMemStrideKV =
+        SMemStride<CFG.n_kv_heads * CFG.d_head, 1, 0, SwizzleTileSize>;
 
     using GSSMemQOStride =
         SMemStride<SwizzleTileSize, 1, 0, B_r * SwizzleTileSize>;
@@ -154,9 +161,11 @@ struct StaticForwardKernelConfig {
     using GSMemLdstConfigQO =
         GSMemLdstConfig<SmemSwizzle, OpGSMemStride, GSMemShapeQO,
                         GSSMemQOStride, GMemStride>;
+    // K and V use GMemStrideKV so that successive rows in the tile are
+    // separated by n_kv_heads * d_head elements — correct for both MHA and GQA.
     using GSMemLdstConfigKV =
         GSMemLdstConfig<SmemSwizzle, OpGSMemStride, GSMemShapeKV,
-                        GSSMemKVStride, GMemStride>;
+                        GSSMemKVStride, GMemStrideKV>;
 
     static constexpr int SRMemTileSize = 16;
     static constexpr int SRMemTileFragments = SRMemTileSize / COLS_PER_FRAGMENT;

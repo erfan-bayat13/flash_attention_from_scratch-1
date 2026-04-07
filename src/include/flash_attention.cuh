@@ -13,11 +13,14 @@ struct ForwardKernelArgs {
     void *__restrict__ V;
     void *__restrict__ O;
 
-    // We assume all strides are the same across all inputs, and that
-    // the tensors are all row major.
+    // Q/O strides (layout: B × S × n_heads × d_head).
     const index_t batch_stride;
     const index_t seq_stride;
     const index_t head_stride;
+
+    // K/V batch stride (layout: B × S × n_kv_heads × d_head).
+    // Equals batch_stride for MHA; smaller for GQA.
+    const index_t kv_batch_stride;
 
     const index_t seq_len;
     const index_t n_heads;
@@ -53,6 +56,9 @@ struct FlashForwardKernelConfig {
     // Whether to apply causal (lower-triangular) masking. Defaults to false
     // so existing 13-argument initializer lists remain valid.
     const bool causal = false;
+    // Number of KV heads. 16 (== N_HEADS) means standard MHA.
+    // Set to N_HEADS/G for GQA with G groups.
+    const int n_kv_heads = 16;
 
     int smem_bytes(int elem_size = 2) const {
         return (B_r + B_c * 2) * d_head * elem_size;
@@ -109,6 +115,9 @@ struct FlashForwardKernelConfig {
         }
         if (causal != other.causal) {
             return causal < other.causal;
+        }
+        if (n_kv_heads != other.n_kv_heads) {
+            return n_kv_heads < other.n_kv_heads;
         }
         return false; // Equal configurations
     }
