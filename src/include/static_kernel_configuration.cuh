@@ -117,6 +117,7 @@ struct StaticForwardKernelConfig {
     static constexpr int d_head = CFG.d_head;
     static constexpr bool eager_load_blocks = CFG.eager_load_blocks;
     static constexpr bool optimized_softmax = CFG.optimized_softmax;
+    static constexpr bool causal = CFG.causal;
 
     static constexpr int SwizzleTileSize = SWIZZLE_TILE_SIZE;
     static constexpr int DHeadSwizzleTiles = d_head / SwizzleTileSize;

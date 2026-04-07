@@ -28,7 +28,8 @@ FlashForwardKernelConfig py_to_cpp_kernel_config(const py::object &py_cfg) {
         py::cast<int>(py_cfg.attr("K_mma_load_K_tiles")),
         py::cast<int>(py_cfg.attr("V_mma_load_K_tiles")),
         py::cast<bool>(py_cfg.attr("mma_double_buffer_loads")),
-        py::cast<bool>(py_cfg.attr("optimized_softmax"))};
+        py::cast<bool>(py_cfg.attr("optimized_softmax")),
+        py::cast<bool>(py_cfg.attr("causal"))};
 }
 
 decltype(auto)

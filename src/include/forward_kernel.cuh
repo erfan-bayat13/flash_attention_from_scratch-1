@@ -16,12 +16,47 @@
 
 namespace flash {
 
-template <bool is_first, bool optimized_softmax, typename Q_t, typename K_t,
-          typename V_t, typename S_accum_t, typename P_t, typename O_accum_t,
-          typename row_statistics_t, typename GEMM_QK, typename GEMM_PV>
+// Apply causal (lower-triangular) mask to the attention score block.
+//
+// MMA m16n8k16 D-matrix thread layout per warp (per 16 x B_c sub-tile):
+//   Thread lane_id holds S[row, col] where, for the view produced by
+//   view_with_op_tiling_removed():
+//     global_row = q_row_start + (q/2)*16 + (q%2)*8 + (lane_id/4)
+//     global_col = kv_col_start + (k/2)*8  + (lane_id%4)*2 + (k%2)
+//
+// Elements where global_col > global_row are future positions and are
+// set to -infinity so that softmax gives them zero weight.
+template <typename S_accum_untiled_t>
+FA_DEVICE void apply_causal_mask(S_accum_untiled_t &S,
+                                  const int q_row_start,
+                                  const int kv_col_start) {
+    constexpr float neg_inf = -cuda::std::numeric_limits<float>::infinity();
+    const int lane_id = threadIdx.x % WARP_SIZE;
+
+    FA_UNROLL
+    for (int q = 0; q < S_accum_untiled_t::Shape::rows(); ++q) {
+        const int global_row =
+            q_row_start + (q / 2) * 16 + (q % 2) * 8 + (lane_id / 4);
+        FA_UNROLL
+        for (int k = 0; k < S_accum_untiled_t::Shape::cols(); ++k) {
+            const int global_col =
+                kv_col_start + (k / 2) * 8 + (lane_id % 4) * 2 + (k % 2);
+            if (global_col > global_row) {
+                S(q, k) = neg_inf;
+            }
+        }
+    }
+}
+
+template <bool is_first, bool is_causal, bool optimized_softmax, typename Q_t,
+          typename K_t, typename V_t, typename S_accum_t, typename P_t,
+          typename O_accum_t, typename row_statistics_t, typename GEMM_QK,
+          typename GEMM_PV>
 FA_DEVICE void process_kv_block(Q_t &Q, K_t &K, V_t &V, O_accum_t &O_accum,
                                 row_statistics_t &m, row_statistics_t &l,
-                                const float &softmax_scale, const int &block) {
+                                const float &softmax_scale, const int &block,
+                                const int q_row_start = 0,
+                                const int kv_col_start = 0) {
 
     S_accum_t S_accum;
     // Initialize the registers for S to 0.
@@ -66,6 +101,12 @@ FA_DEVICE void process_kv_block(Q_t &Q, K_t &K, V_t &V, O_accum_t &O_accum,
     // Online softmax
     auto S_accum_untiled = S_accum.view_with_op_tiling_removed();
     auto O_accum_no_op_tiling = O_accum.view_with_op_tiling_removed();
+
+    // Apply causal mask before softmax: set future positions to -inf.
+    if constexpr (is_causal) {
+        apply_causal_mask(S_accum_untiled, q_row_start, kv_col_start);
+    }
+
     local_softmax<is_first, optimized_softmax>(
         S_accum_untiled, O_accum_no_op_tiling, m, l, softmax_scale);
 
@@ -139,7 +180,22 @@ flash_forward_kernel(__grid_constant__ const ForwardKernelArgs args) {
     O_accum_t O_accum;
     auto O_accum_no_op_tiling = O_accum.view_with_op_tiling_removed();
 
-    int block = args.n_KV_blocks - 1;
+    // For causal attention each Q block only attends to KV blocks whose
+    // positions do not exceed the last query position in this block.
+    // General formula: last valid KV block = floor((q_seq_block*B_r + B_r-1) / B_c).
+    // When B_r == B_c this simplifies to q_seq_block.
+    const int warp_id = threadIdx.x / WARP_SIZE;
+    const int q_row_start =
+        q_seq_block * Kernel::B_r + warp_id * Kernel::N::QO_rows_per_warp;
+
+    int block;
+    if constexpr (Kernel::causal) {
+        block = min(args.n_KV_blocks - 1,
+                    (q_seq_block * Kernel::B_r + Kernel::B_r - 1) / Kernel::B_c);
+    } else {
+        block = args.n_KV_blocks - 1;
+    }
+
     // Start the async copy of the Q and K tiles.
     Q.copy_GM2SM(0);
     cp_async_commit();
@@ -172,15 +228,17 @@ flash_forward_kernel(__grid_constant__ const ForwardKernelArgs args) {
         Q.copy_SM2RF_all_tiles();
     }
 
-    process_kv_block<true, Kernel::optimized_softmax, Q_t, K_t, V_t, S_accum_t,
-                     P_t, O_accum_t, row_statistics_t, GEMM_QK, GEMM_PV>(
-        Q, K, V, O_accum, m, l, softmax_scale, block);
+    process_kv_block<true, Kernel::causal, Kernel::optimized_softmax, Q_t, K_t,
+                     V_t, S_accum_t, P_t, O_accum_t, row_statistics_t, GEMM_QK,
+                     GEMM_PV>(Q, K, V, O_accum, m, l, softmax_scale, block,
+                              q_row_start, block * Kernel::B_c);
 
     --block;
     for (; block >= 0; --block) {
-        process_kv_block<false, Kernel::optimized_softmax, Q_t, K_t, V_t,
-                         S_accum_t, P_t, O_accum_t, row_statistics_t, GEMM_QK,
-                         GEMM_PV>(Q, K, V, O_accum, m, l, softmax_scale, block);
+        process_kv_block<false, Kernel::causal, Kernel::optimized_softmax, Q_t,
+                         K_t, V_t, S_accum_t, P_t, O_accum_t, row_statistics_t,
+                         GEMM_QK, GEMM_PV>(Q, K, V, O_accum, m, l, softmax_scale,
+                                           block, q_row_start, block * Kernel::B_c);
     }
 
     final_softmax_normalization(O_accum_no_op_tiling, l);

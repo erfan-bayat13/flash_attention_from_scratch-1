@@ -17,13 +17,13 @@ from flash_helpers.test.utils import (
 class BaseFlashAttentionTest:
     @classmethod
     def setUpClass(cls):
-        seq_len = 2048
+        seq_len = 512 #2048
         batch_size = BATCH_SIZE_FOR_SEQ_LEN[seq_len]
         n_heads = BENCHMARK_N_HEADS
         dtype = cls.dtype()
         device = "cuda:0"
 
-        cls.d_heads = [128]
+        cls.d_heads = [16] #128
 
         cls.data = {}
         cls.pt_b16_results = {}

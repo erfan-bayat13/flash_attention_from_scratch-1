@@ -118,6 +118,7 @@ class FlashForwardKernelConfig:
     V_mma_load_K_tiles: int
     mma_double_buffer_loads: bool
     optimized_softmax: bool
+    causal: bool = False
 
     def __str__(self):
         return self.short_form()
@@ -142,6 +143,8 @@ class FlashForwardKernelConfig:
             strs.append("buffer")
         if self.optimized_softmax:
             strs.append("opt_softmax")
+        if self.causal:
+            strs.append("causal")
 
         return base + "+".join(strs)
 
@@ -158,7 +161,7 @@ class FlashForwardKernelConfig:
             f"{vstr(self.async_copy)}, {vstr(self.eager_load_blocks)}, "
             f"{vstr(self.swizzled)}, {self.Q_mma_load_K_tiles}, {self.K_mma_load_K_tiles}, "
             f"{self.V_mma_load_K_tiles}, {vstr(self.mma_double_buffer_loads)}, "
-            f"{vstr(self.optimized_softmax)}"
+            f"{vstr(self.optimized_softmax)}, {vstr(self.causal)}"
             f"}}"
         )
 
@@ -240,8 +243,8 @@ def _parse_flash_forward_demanged_name_with_types(
         else:
             raise ValueError(f"Unexpected parameter format: {value}")
 
-    # Ensure we have exactly 12 parameters
-    if len(params) != 13:
+    # Accept 13 params (causal defaults to False) or 14 (causal explicit).
+    if len(params) not in (13, 14):
         raise ValueError("Incorrect number of parameters parsed")
 
     # Return the dataclass instance

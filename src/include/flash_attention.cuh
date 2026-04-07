@@ -50,6 +50,9 @@ struct FlashForwardKernelConfig {
     // if true, call ldmatrix for the next iter before calling mma.
     const bool mma_double_buffer_loads;
     const bool optimized_softmax;
+    // Whether to apply causal (lower-triangular) masking. Defaults to false
+    // so existing 13-argument initializer lists remain valid.
+    const bool causal = false;
 
     int smem_bytes(int elem_size = 2) const {
         return (B_r + B_c * 2) * d_head * elem_size;
@@ -103,6 +106,9 @@ struct FlashForwardKernelConfig {
         }
         if (optimized_softmax != other.optimized_softmax) {
             return optimized_softmax < other.optimized_softmax;
+        }
+        if (causal != other.causal) {
+            return causal < other.causal;
         }
         return false; // Equal configurations
     }

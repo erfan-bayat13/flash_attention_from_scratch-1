@@ -4,7 +4,6 @@ import einops
 import torch
 
 import flash_attn_2_cuda  # isort: skip
-import flash_attn_3_cuda
 
 BATCH_SIZE_FOR_SEQ_LEN = {
     512: 16,
@@ -17,42 +16,7 @@ BATCH_SIZE_FOR_SEQ_LEN = {
 BENCHMARK_N_HEADS = 16
 
 
-def reference_forward_kernel_v3(q, k, v, o=None):
-    head_dim = q.shape[-1]
-    return flash_attn_3_cuda.fwd(
-        q,
-        k,
-        v,
-        None,
-        None,
-        None,
-        o,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        None,
-        head_dim**-0.5,
-        False,
-        -1,
-        -1,
-        -1,
-        0.0,
-        False,
-        0,
-        None,
-        0,
-    )[0]
+
 
 
 def reference_forward_kernel_v2(q, k, v, o=None):

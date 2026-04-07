@@ -33,6 +33,10 @@ std::map<FlashForwardKernelConfig, forward_kernel_fn>
         {FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, false, false, 0, 0, 0, false, false}, &flash_forward_kernel<StaticForwardKernelConfig<FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, false, false, 0, 0, 0, false, false}>>},
         // (FP16, 128, 64, 64, 4): async+swizzled+load_0_0_0_tiles
         {FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, false, true, 0, 0, 0, false, false}, &flash_forward_kernel<StaticForwardKernelConfig<FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, false, true, 0, 0, 0, false, false}>>},
+        // (FP16, 128, 64, 64, 4): async+load_0_0_0_tiles+causal  — MHA baseline, no swizzle
+        {FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, false, false, 0, 0, 0, false, false, true}, &flash_forward_kernel<StaticForwardKernelConfig<FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, false, false, 0, 0, 0, false, false, true}>>},
+        // (FP16, 128, 64, 64, 4): async+swizzled+load_0_0_0_tiles+causal  — MHA baseline, swizzle
+        {FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, false, true, 0, 0, 0, false, false, true}, &flash_forward_kernel<StaticForwardKernelConfig<FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, false, true, 0, 0, 0, false, false, true}>>},
         // (FP16, 128, 64, 64, 4): async+eager+swizzled+load_0_0_0_tiles
         {FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, true, true, 0, 0, 0, false, false}, &flash_forward_kernel<StaticForwardKernelConfig<FlashForwardKernelConfig{torch::kFloat16, 128, 64, 64, 4, true, true, true, 0, 0, 0, false, false}>>},
         // (FP16, 128, 64, 64, 4): async+eager+swizzled+load_0_0_0_tiles+opt_softmax
